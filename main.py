@@ -1,6 +1,6 @@
 import os
 
-import google.generativeai as genai
+import google.genai as genai
 import psycopg2
 import pymupdf
 from dotenv import load_dotenv
@@ -10,7 +10,9 @@ load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 DB_URL = os.getenv("DATABASE_URL")
 
-genai.configure(api_key=API_KEY)
+client = genai.Client(
+    api_key=API_KEY
+)
 
 
 def extract_text_from_pdf(file_path: str) -> str:
@@ -35,13 +37,15 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[st
 
 
 def get_embedding(text: str) -> list[float]:
-    result = genai.embed_content(
+    result = client.models.embed_content(
         model="models/gemini-embedding-001",
-        content=text,
-        task_type="retrieval_document"
+        contents=text,
+        config={
+            "task_type": "RETRIEVAL_DOCUMENT"
+        }
     )
 
-    return result['embedding']
+    return result.embeddings[0].values
 
 
 def save_to_database(content: str, embedding: list[float]):
@@ -53,31 +57,45 @@ def save_to_database(content: str, embedding: list[float]):
         INSERT INTO document_chunks (content, embedding)
         VALUES (%s, %s);
     """
-
     cursor.execute(sql, (content, str(embedding)))
-
     conn.commit()
 
     cursor.close()
     conn.close()
 
 
+def search_similar_chunks(query: str) -> list[str]:
+
+    query_vector = get_embedding(query)
+
+    conn = psycopg2.connect(DB_URL)
+    cursor = conn.cursor()
+    sql = "SELECT content, similarity FROM match_document_chunks(%s,%s,%s);"
+
+    cursor.execute(sql, (str(query_vector), 0.7, 3))
+    chunks = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    best_chunks = []
+    for chunk in chunks:
+        best_chunks.append(chunk[0])
+
+    return best_chunks
+
+
 if __name__ == "__main__":
-    path = "./test.pdf"
-    print("extraction...")
-    result = extract_text_from_pdf(path)
-    print(f"total characters length: {len(result)}")
 
-    print("chunking...")
-    chunks = chunk_text(result)
-    print(f"number of chunks : {len(chunks)}")
+    question = "Quel est le sujet principal de ce document?"
+    print(f"Searching for answers to: '{question}'...\n")
 
-    if len(chunks) > 0:
-        print(f"Preparing to process {len(chunks)} chunks...")
-        for i, chunk in enumerate(chunks):
-            print(f"Processing chunk {i + 1}/{len(chunks)}...")
+    results = search_similar_chunks(question)
 
-            vector = get_embedding(chunk)
-            save_to_database(chunk, vector)
-
-        print("Success! All chunks are securely stored in the Supabase vector database.")
+    if len(results) == 0:
+        print("No matches found. Try lowering your 0.7 threshold to 0.5!")
+    else:
+        print(f"Found {len(results)} highly relevant chunks!")
+        for i, text in enumerate(results):
+            print(f"\n--- TOP MATCH {i+1} ---")
+            print(text[:300] + "...")
