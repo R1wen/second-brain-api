@@ -1,12 +1,15 @@
 import os
 
 import google.generativeai as genai
+import psycopg2
 import pymupdf
 from dotenv import load_dotenv
 
 load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
+DB_URL = os.getenv("DATABASE_URL")
+
 genai.configure(api_key=API_KEY)
 
 
@@ -41,6 +44,24 @@ def get_embedding(text: str) -> list[float]:
     return result['embedding']
 
 
+def save_to_database(content: str, embedding: list[float]):
+
+    conn = psycopg2.connect(DB_URL)
+    cursor = conn.cursor()
+
+    sql = """
+        INSERT INTO document_chunks (content, embedding)
+        VALUES (%s, %s);
+    """
+
+    cursor.execute(sql, (content, str(embedding)))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+
 if __name__ == "__main__":
     path = "./test.pdf"
     print("extraction...")
@@ -52,8 +73,11 @@ if __name__ == "__main__":
     print(f"number of chunks : {len(chunks)}")
 
     if len(chunks) > 0:
-        print("\nSending the first chunk to Gemini to get its embedding...")
-        first_chunk = chunks[0]
-        vector = get_embedding(first_chunk)
-        print("The first 5 numbers of that vector:")
-        print(vector[:5])
+        print(f"Preparing to process {len(chunks)} chunks...")
+        for i, chunk in enumerate(chunks):
+            print(f"Processing chunk {i + 1}/{len(chunks)}...")
+
+            vector = get_embedding(chunk)
+            save_to_database(chunk, vector)
+
+        print("Success! All chunks are securely stored in the Supabase vector database.")
