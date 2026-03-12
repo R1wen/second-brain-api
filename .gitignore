@@ -2,3 +2,4 @@ venv/
 .env
 roadmap.txt
 test.pdf
+__pycache__/
