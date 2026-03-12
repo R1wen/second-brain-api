@@ -85,17 +85,43 @@ def search_similar_chunks(query: str) -> list[str]:
     return best_chunks
 
 
+def generate_answer(query: str, context_chunks: list[str]) -> str:
+    context_text = "\n\n---\n\n".join(context_chunks)
+
+    prompt = f"""
+    You are a helpful and precise assistant. 
+    Answer the user's question using ONLY the provided context below. 
+    If the answer is not contained in the context, do not guess. Simply say: "I'm sorry, I cannot find the answer in the provided document."
+
+    CONTEXT:
+    {context_text}
+
+    QUESTION:
+    {query}
+    """
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+
+    return response.text
+
+
 if __name__ == "__main__":
+    question = "A quoi sert 'this' en java ?"
+    print(f"User Question: '{question}'\n")
 
-    question = "Quel est le sujet principal de ce document?"
-    print(f"Searching for answers to: '{question}'...\n")
-
+    print("1. Searching the vector database for relevant chunks...")
     results = search_similar_chunks(question)
 
     if len(results) == 0:
-        print("No matches found. Try lowering your 0.7 threshold to 0.5!")
+        print("No matches found in the database.")
     else:
-        print(f"Found {len(results)} highly relevant chunks!")
-        for i, text in enumerate(results):
-            print(f"\n--- TOP MATCH {i+1} ---")
-            print(text[:300] + "...")
+        print(f"   Found {len(results)} chunks.")
+
+        print("2. Sending the chunks to Gemini to generate an answer...\n")
+        final_answer = generate_answer(question, results)
+
+        print("================ AI ANSWER ================")
+        print(final_answer)
